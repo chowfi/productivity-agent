@@ -1,8 +1,9 @@
 """
 Task Scheduler MCP Server
 
-MCP server that uses service-based architecture.
-Provides 5 simple tools: add_task(), set_default_doc_id(), get_default_doc_id(), check_setup_status(), and generate_and_create_tomorrow_schedule().
+MCP server that provides data access tools for task scheduling.
+Exposes 8 tools for calendar events, document operations, and task memory management.
+Also provides document content as resources and workflow prompts.
 """
 
 from contextlib import asynccontextmanager
@@ -76,44 +77,18 @@ async def app_lifespan(mcp: FastMCP):
 
 mcp = FastMCP(
     name="task-scheduler-server",
-    instructions=f"""You are a task scheduling assistant.
+    instructions="""You are the Task Scheduling Data Service.
 
-Current date: {datetime.now().strftime('%A, %B %d, %Y')}
+Your role: Provide access to Google Calendar events, Google Doc content, and task memory storage.
 
-You have these tools:
-1. add_task() - Add tasks to temporary memory
-2. set_default_doc_id() - Set default Google Doc ID (do this once)
-3. get_default_doc_id() - Check current default Google Doc ID
-4. check_setup_status() - Check if system is ready for task scheduling
-5. generate_and_create_tomorrow_schedule() - Generate complete schedule
+You expose:
+- Calendar event fetching
+- Free time slot calculation  
+- Document reading/writing
+- Task memory management
+- Document content as resources
 
-**CRITICAL: Always check for default doc ID first!**
-
-**When user wants to add tasks or generate schedules:**
-1. FIRST call check_setup_status() to see if system is ready
-2. If setup is required, guide them through it BEFORE proceeding
-3. If system is ready, proceed with their request
-
-**Setup Process for New Users:**
-- Ask for their Google Doc URL or ID
-- Help them extract the ID from the URL if needed
-- Use set_default_doc_id() with their doc ID
-- THEN they can add tasks and generate schedules
-
-**Natural Language Examples:**
-- User: "I want to set up my Google Doc: https://docs.google.com/document/d/1ABC123XYZ789/edit"
-- You: Call set_default_doc_id("https://docs.google.com/document/d/1ABC123XYZ789/edit")
-- User: "My doc ID is 1ABC123XYZ789"  
-- You: Call set_default_doc_id("1ABC123XYZ789")
-
-**User Experience Flow:**
-1. User says "I want to add a task" or "generate schedule"
-2. You call check_setup_status() first
-3. If setup required: Show the setup message and guide them through it
-4. If system ready: Proceed with their request
-
-**Be proactive about setup - never assume they have a default doc ID!**
-""",
+You do NOT orchestrate workflows or make scheduling decisions - you only fetch and write data.""",
     lifespan=app_lifespan
 )
 
@@ -203,29 +178,188 @@ async def check_setup_status(
     return service.check_setup_status()
 
 @mcp.tool()
-async def generate_and_create_tomorrow_schedule(
-    doc_id: str = None,
-    work_start_hour: int = 9,
-    work_end_hour: int = 15,
+async def get_calendar_events(
+    date: str,
     ctx: Context = None
 ) -> str:
     """
-    Generate complete schedule and append to Google Doc.
-    
-    This does everything in one call:
-    - Parse incomplete tasks from doc
-    - Get calendar events
-    - Combine all tasks (carryover + new + still-on-list)
-    - Prioritize and schedule
-    - Append to doc
+    Get calendar events for a specific date.
     
     Args:
-        doc_id: Google Doc ID (optional, uses default if not provided)
-        work_start_hour: Start of work day (default 9am)
-        work_end_hour: End of work day (default 3pm)
+        date: Date in YYYY-MM-DD format
+    """
+    from datetime import datetime
+    service = ctx.request_context.lifespan_context.google_calendar_service
+    target_date = datetime.strptime(date, "%Y-%m-%d").date()
+    events = service.get_events_for_date(target_date)
+    return f"Found {len(events)} events for {date}: {events}"
+
+@mcp.tool()
+async def get_free_time_slots(
+    date: str,
+    start_hour: int = 9,
+    end_hour: int = 17,
+    ctx: Context = None
+) -> str:
+    """
+    Get free time slots for a specific date.
+    
+    Args:
+        date: Date in YYYY-MM-DD format
+        start_hour: Start of work day (24-hour format)
+        end_hour: End of work day (24-hour format)
+    """
+    from datetime import datetime
+    service = ctx.request_context.lifespan_context.google_calendar_service
+    target_date = datetime.strptime(date, "%Y-%m-%d").date()
+    slots = service.get_free_time_slots(target_date, start_hour, end_hour)
+    return f"Free time slots for {date}: {slots}"
+
+@mcp.tool()
+async def read_doc_content(
+    doc_id: str,
+    ctx: Context = None
+) -> str:
+    """
+    Read content from a Google Doc.
+    
+    Args:
+        doc_id: Google Doc ID
+    """
+    service = ctx.request_context.lifespan_context.google_docs_service
+    content = service.read_document(doc_id)
+    return content
+
+@mcp.tool()
+async def write_schedule_to_doc(
+    doc_id: str,
+    content: str,
+    ctx: Context = None
+) -> str:
+    """
+    Write content to a Google Doc.
+    
+    Args:
+        doc_id: Google Doc ID
+        content: Content to write to document
+    """
+    service = ctx.request_context.lifespan_context.google_docs_service
+    service.write_to_doc(doc_id, content)
+    return f"Successfully wrote content to document {doc_id}"
+
+@mcp.tool()
+async def get_tasks_from_memory(
+    ctx: Context = None
+) -> str:
+    """
+    Get all tasks currently in memory.
     """
     service = ctx.request_context.lifespan_context.task_scheduler_service
-    return service.generate_complete_schedule(doc_id, work_start_hour, work_end_hour)
+    tasks = service.get_tasks_from_memory()
+    return f"Tasks in memory: {tasks}"
+
+@mcp.tool()
+async def clear_tasks_memory(
+    ctx: Context = None
+) -> str:
+    """
+    Clear all tasks from memory.
+    """
+    service = ctx.request_context.lifespan_context.task_scheduler_service
+    return service.clear_tasks_memory()
+
+# === RESOURCES ===
+
+@mcp.resource(uri="docs://{doc_id}")
+async def get_doc_resource(doc_id: str, ctx: Context) -> str:
+    """Expose Google Doc content as a resource."""
+    service = ctx.request_context.lifespan_context.google_docs_service
+    return service.read_document(doc_id)
+
+# === PROMPTS ===
+
+@mcp.prompt()
+async def generate_tomorrow_schedule(
+    work_start_hour: int = 9,
+    work_end_hour: int = 17
+) -> str:
+    """DETAILED step-by-step workflow for generating tomorrow's schedule.
+    
+    This is the most comprehensive, reusable workflow template for creating daily schedules.
+    
+    DETAILED WORKFLOW:
+    
+    1. CHECK SETUP
+       - Call check_setup_status()
+       - If no default doc ID, guide user to provide it
+       - Use set_default_doc_id() with their doc ID
+    
+    2. READ DOCUMENT CONTENT
+       - Use read_doc_content(doc_id) or docs://[doc_id] resource
+       - Parse today's date section (format: MM/DD/YY - Day)
+       - Extract incomplete tasks (lines starting with "-" but no ✓ or ✔)
+       - Extract "Still on list" sections from previous days
+    
+    3. GET NEW TASKS
+       - Call get_tasks_from_memory()
+       - These are tasks added via add_task() calls
+    
+    4. GET CALENDAR DATA
+       - Get tomorrow's date (today + 1 day)
+       - Call get_calendar_events(tomorrow_date)
+       - Call get_free_time_slots(tomorrow_date, work_start_hour, work_end_hour)
+    
+    5. COMBINE ALL TASKS
+       - Merge: carryover + new_tasks + still_on_list
+       - Deduplicate by task name
+       - Preserve source information
+    
+    6. PRIORITIZE TASKS
+       - Calculate priority scores:
+         * Urgency: critical=10, high=7, medium=4, low=1
+         * Due date: overdue/today=+5, tomorrow=+3, this_week=+1, later=0
+         * Carryover boost: +3 for persistent tasks (source=carryover/still_on_list)
+       - Sort by priority (highest first)
+    
+    7. SCHEDULE INTO TIME BLOCKS
+       - Target 6-8 hours of work
+       - Fit tasks into free time slots around meetings
+       - Start with highest priority tasks
+       - Track scheduled vs unscheduled
+    
+    8. FORMAT SCHEDULE
+       - Header: MM/DD/YY - Day
+       - Chronological order: mix tasks and meetings by time
+       - Task format: HH:MM - HH:MM: Task name (Xh, urgency - due date)
+       - Meeting format: [Meeting: HH:MM - HH:MM: Meeting name]
+       - Catch-all section: "Still on list (not scheduled today):"
+       - Footer: "---"
+       - CRITICAL: Follow this EXACT format, no deviations, no "NOTES" sections, no custom formatting
+    
+    9. WRITE AND CLEANUP
+       - Call write_schedule_to_doc(doc_id, formatted_schedule)
+       - Call clear_tasks_memory()
+    
+    TASK PARSING RULES:
+    - Incomplete: "- Task name (Xh, urgency - due YYYY-MM-DD)"
+    - Completed: "- ✓ Task name" or "- ✔ Task name" (skip these)
+    - Still on list: Look for "Still on list" sections in previous days
+    
+    OUTPUT FORMAT (EXACT TEMPLATE):
+    10/18/25 - Sat
+    
+    09:00 - 10:00: Declutter (1h, critical)
+    10:00 - 11:30: Fix Verizon (1.5h, critical)
+    [Meeting: 11:30 - 12:00: Team standup]
+    12:00 - 13:00: Laundry (1h, critical)
+    
+    Still on list (not scheduled today):
+    - Update docs (2h, medium urgency - due 10/20/25)
+    
+    ---
+    
+    CRITICAL: Use this EXACT format. NO "NOTES" sections, NO custom headers, NO deviations.
+    """
 
 # === SERVER ENTRY POINT ===
 

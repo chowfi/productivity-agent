@@ -1,11 +1,11 @@
 """
 Google Docs Service
 
-Handles Google Docs API integration for reading, parsing, and updating documents.
+Handles Google Docs API integration for reading and writing documents.
+Provides simple fetch/write operations for document content.
 """
 
 import os
-import re
 from datetime import datetime, date
 from typing import List, Dict, Optional
 from pathlib import Path
@@ -106,204 +106,31 @@ class GoogleDocsService:
             self.logger.error(f"Error reading document: {e}")
             return ""
     
-    def parse_tasks_from_doc(self, doc_id: str) -> List[Dict]:
+    
+    
+    
+    def write_to_doc(self, doc_id: str, content: str):
         """
-        Parse tasks from document format.
-        
-        Looks for today's date section and extracts incomplete tasks.
-        Format: "- Task (2h, urgent - due date)"
+        Write content to the top of the document.
         
         Args:
             doc_id: Google Doc ID
-            
-        Returns:
-            List of task dictionaries
-        """
-        try:
-            content = self.read_document(doc_id)
-            if not content:
-                return []
-            
-            lines = content.split('\n')
-            tasks = []
-            current_date = None
-            today = datetime.now().date()
-            
-            # Look for today's date section
-            today_pattern = today.strftime('%m/%d/%y')
-            
-            for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
-                
-                # Check if this is a date header
-                if re.match(r'\d{1,2}/\d{1,2}/\d{2,4}\s*-\s*\w+', line):
-                    current_date = line
-                    continue
-                
-                # Check if this is today's section
-                if today_pattern in line:
-                    current_date = line
-                    continue
-                
-                # Parse task lines (only from today's section)
-                if current_date and today_pattern in current_date and line.startswith('-'):
-                    task_text = line[1:].strip()
-                    
-                    # Skip completed tasks (with checkmarks)
-                    if '✔' in task_text or '✓' in task_text:
-                        continue
-                    
-                    # Parse task details
-                    task_info = self._parse_task_details(task_text)
-                    if task_info:
-                        task_info['source'] = 'carryover'
-                        tasks.append(task_info)
-            
-            self.logger.info(f"Parsed {len(tasks)} incomplete tasks from today's section")
-            return tasks
-            
-        except Exception as e:
-            self.logger.error(f"Error parsing tasks from doc: {e}")
-            return []
-    
-    def parse_still_on_list(self, doc_id: str) -> List[Dict]:
-        """
-        Parse 'Still on list' section from previous days.
-        
-        Args:
-            doc_id: Google Doc ID
-            
-        Returns:
-            List of tasks from "still on list" sections
-        """
-        try:
-            content = self.read_document(doc_id)
-            if not content:
-                return []
-            
-            lines = content.split('\n')
-            tasks = []
-            in_still_on_list = False
-            
-            for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
-                
-                # Check if we're in a "Still on list" section
-                if 'Still on list' in line or 'still on list' in line:
-                    in_still_on_list = True
-                    continue
-                
-                # Check if we've moved to a new date section
-                if re.match(r'\d{1,2}/\d{1,2}/\d{2,4}\s*-\s*\w+', line):
-                    in_still_on_list = False
-                    continue
-                
-                # Parse tasks from "still on list" section
-                if in_still_on_list and line.startswith('-'):
-                    task_text = line[1:].strip()
-                    
-                    # Skip completed tasks
-                    if '✔' in task_text or '✓' in task_text:
-                        continue
-                    
-                    # Parse task details
-                    task_info = self._parse_task_details(task_text)
-                    if task_info:
-                        task_info['source'] = 'still_on_list'
-                        tasks.append(task_info)
-            
-            self.logger.info(f"Parsed {len(tasks)} tasks from 'still on list' sections")
-            return tasks
-            
-        except Exception as e:
-            self.logger.error(f"Error parsing still on list: {e}")
-            return []
-    
-    def _parse_task_details(self, task_text: str) -> Optional[Dict]:
-        """
-        Parse task details from text.
-        
-        Format: "Task name (2h, urgent - due date)"
-        
-        Args:
-            task_text: Raw task text
-            
-        Returns:
-            Task dictionary or None if parsing fails
-        """
-        try:
-            # Extract details from parentheses
-            details_match = re.search(r'\(([^)]+)\)', task_text)
-            if not details_match:
-                return None
-            
-            details = details_match.group(1)
-            
-            # Extract duration
-            duration_match = re.search(r'(\d+(?:\.\d+)?)h', details)
-            hours = float(duration_match.group(1)) if duration_match else 1.0
-            
-            # Extract urgency
-            urgency = 'medium'  # default
-            if 'urgent' in details.lower():
-                urgency = 'urgent'
-            elif 'high' in details.lower():
-                urgency = 'high'
-            elif 'critical' in details.lower():
-                urgency = 'critical'
-            elif 'low' in details.lower():
-                urgency = 'low'
-            
-            # Extract due date
-            due_date = None
-            due_match = re.search(r'due\s+(\d{4}-\d{2}-\d{2})', details)
-            if due_match:
-                due_date = due_match.group(1)
-            
-            # Extract task name (everything before parentheses)
-            task_name = task_text.split('(')[0].strip()
-            
-            return {
-                'name': task_name,
-                'hours': hours,
-                'urgency': urgency,
-                'due_date': due_date
-            }
-            
-        except Exception as e:
-            self.logger.error(f"Error parsing task details: {e}")
-            return None
-    
-    def append_schedule(self, doc_id: str, schedule_text: str):
-        """
-        Append schedule to document.
-        
-        Args:
-            doc_id: Google Doc ID
-            schedule_text: Formatted schedule text to append
+            content: Content to write to document
         """
         if not self.service:
             raise RuntimeError("Service not initialized. Call initialize() first.")
         
         try:
-            self.logger.info(f"Appending schedule to document: {doc_id}")
+            self.logger.info(f"Writing content to document: {doc_id}")
             
-            # Get current document to find end position
-            document = self.service.documents().get(documentId=doc_id).execute()
-            end_index = document.get('body', {}).get('content', [])[-1].get('endIndex', 1) - 1
-            
-            # Prepare the text to insert
+            # Insert at the beginning of the document
             requests = [
                 {
                     'insertText': {
                         'location': {
-                            'index': end_index,
+                            'index': 1,  # Insert at the beginning
                         },
-                        'text': '\n\n' + schedule_text + '\n'
+                        'text': content + '\n\n'
                     }
                 }
             ]
@@ -313,12 +140,12 @@ class GoogleDocsService:
                 documentId=doc_id, body={'requests': requests}
             ).execute()
             
-            self.logger.info("Successfully appended schedule to document")
+            self.logger.info("Successfully wrote content to document")
             return result
             
         except HttpError as error:
             self.logger.error(f"Docs API error: {error}")
             raise
         except Exception as e:
-            self.logger.error(f"Error appending schedule: {e}")
+            self.logger.error(f"Error writing to document: {e}")
             raise

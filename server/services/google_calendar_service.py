@@ -144,9 +144,11 @@ class GoogleCalendarService:
             start_time = datetime.fromisoformat(event['start'].replace('Z', '+00:00'))
             end_time = datetime.fromisoformat(event['end'].replace('Z', '+00:00'))
             
-            # Convert to local time (assuming same timezone)
-            start_hour = start_time.hour
-            end_hour = end_time.hour
+            # Convert to local time and handle minutes properly
+            start_hour = start_time.hour + start_time.minute / 60.0
+            end_hour = end_time.hour + end_time.minute / 60.0
+            
+            self.logger.info(f"Event: {event['summary']} from {start_hour:.2f} to {end_hour:.2f}")
             
             event_blocks.append({
                 'start': start_hour,
@@ -159,7 +161,7 @@ class GoogleCalendarService:
         
         # Find free slots
         free_slots = []
-        current_time = work_start_hour
+        current_time = float(work_start_hour)
         
         for event in event_blocks:
             if current_time < event['start']:
@@ -179,4 +181,5 @@ class GoogleCalendarService:
                 'duration': work_end_hour - current_time
             })
         
+        self.logger.info(f"Calculated free slots: {free_slots}")
         return free_slots
