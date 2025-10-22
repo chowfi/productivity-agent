@@ -298,7 +298,8 @@ async def generate_tomorrow_schedule(
        - Use read_doc_content(doc_id) or docs://[doc_id] resource
        - Parse today's date section (format: MM/DD/YY - Day)
        - Extract incomplete tasks (lines starting with "-" but no ✓ or ✔)
-       - Extract "Still on list" sections from previous days
+       - Extract "Still on list" sections from current day's todo list that is not completed as well (lines starting with "-" but no ✓ or ✔)
+       - CRITICAL: Include ALL incomplete tasks from today's section
     
     3. GET NEW TASKS
        - Call get_tasks_from_memory()
@@ -308,6 +309,8 @@ async def generate_tomorrow_schedule(
        - Get tomorrow's date (today + 1 day)
        - Call get_calendar_events(tomorrow_date)
        - Call get_free_time_slots(tomorrow_date, work_start_hour, work_end_hour)
+       - CRITICAL: Only include events from your main calendar (visible in Google Calendar UI)
+       - CRITICAL: Exclude secondary calendars, shared calendars.
     
     5. COMBINE ALL TASKS
        - Merge: carryover + new_tasks + still_on_list
@@ -326,6 +329,7 @@ async def generate_tomorrow_schedule(
        - Fit tasks into free time slots around meetings
        - Start with highest priority tasks
        - Track scheduled vs unscheduled
+       - CRITICAL: Check for time overlaps - no tasks should overlap with meetings or other tasks
     
     8. FORMAT SCHEDULE
        - Header: MM/DD/YY - Day
@@ -341,9 +345,10 @@ async def generate_tomorrow_schedule(
        - Call clear_tasks_memory()
     
     TASK PARSING RULES:
-    - Incomplete: "- Task name (Xh, urgency - due YYYY-MM-DD)"
+    - Incomplete: "- Task name (Xh, urgency - due YYYY-MM-DD)" (NO ✓ or ✔)
     - Completed: "- ✓ Task name" or "- ✔ Task name" (skip these)
-    - Still on list: Look for "Still on list" sections in previous days
+    - Still on list: Look for "Still on list" section in current day's todo list that is not completed as well
+    
     
     OUTPUT FORMAT (EXACT TEMPLATE):
     10/18/25 - Sat
@@ -354,11 +359,14 @@ async def generate_tomorrow_schedule(
     12:00 - 13:00: Laundry (1h, critical)
     
     Still on list (not scheduled today):
+    - Boltz project (2h, medium urgency - due 10/19/25)
+    - 1 Leetcode (1h, medium urgency - due 10/20/25)
     - Update docs (2h, medium urgency - due 10/20/25)
     
     ---
     
     CRITICAL: Use this EXACT format. NO "NOTES" sections, NO custom headers, NO deviations.
+    CRITICAL: Include ALL unscheduled tasks in "Still on list" section, even if they don't fit today.
     """
 
 # === SERVER ENTRY POINT ===

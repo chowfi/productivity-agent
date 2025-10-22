@@ -124,7 +124,7 @@ class GoogleCalendarService:
             self.logger.error(f"Error fetching events: {e}")
             return []
     
-    def get_free_time_slots(self, target_date: date, work_start_hour: int = 9, work_end_hour: int = 17) -> List[Dict]:
+    def get_free_time_slots(self, target_date: date, work_start_hour: int = 8, work_end_hour: int = 20) -> List[Dict]:
         """
         Get free time slots for a specific date.
         
