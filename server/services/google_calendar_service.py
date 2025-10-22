@@ -78,13 +78,20 @@ class GoogleCalendarService:
             raise RuntimeError("Service not initialized. Call initialize() first.")
         
         try:
-            # Convert date to datetime range
-            start_datetime = datetime.combine(target_date, datetime.min.time())
-            end_datetime = datetime.combine(target_date, datetime.max.time())
+            # Convert date to datetime range in local timezone
+            # Use timezone-aware datetimes to avoid UTC conversion issues
+            from datetime import timezone
+            import pytz
             
-            # Format for API
-            start_time = start_datetime.isoformat() + 'Z'
-            end_time = end_datetime.isoformat() + 'Z'
+            # Get local timezone (Eastern Time)
+            local_tz = pytz.timezone('America/New_York')
+            
+            start_datetime = local_tz.localize(datetime.combine(target_date, datetime.min.time()))
+            end_datetime = local_tz.localize(datetime.combine(target_date, datetime.max.time()))
+            
+            # Format for API (will include timezone offset)
+            start_time = start_datetime.isoformat()
+            end_time = end_datetime.isoformat()
             
             self.logger.info(f"Fetching events for {target_date}")
             
@@ -137,6 +144,8 @@ class GoogleCalendarService:
             List of free time slots
         """
         events = self.get_events_for_date(target_date)
+        self.logger.info(f"Processing {len(events)} events for free time calculation")
+        self.logger.info(f"Work hours: {work_start_hour}:00 to {work_end_hour}:00")
         
         # Convert events to time blocks
         event_blocks = []
@@ -165,12 +174,14 @@ class GoogleCalendarService:
         
         for event in event_blocks:
             if current_time < event['start']:
-                # Free slot before this event
-                free_slots.append({
-                    'start': current_time,
-                    'end': event['start'],
-                    'duration': event['start'] - current_time
-                })
+                # Free slot before this event (but don't go past work_end_hour)
+                slot_end = min(event['start'], work_end_hour)
+                if current_time < slot_end:
+                    free_slots.append({
+                        'start': current_time,
+                        'end': slot_end,
+                        'duration': slot_end - current_time
+                    })
             current_time = max(current_time, event['end'])
         
         # Check for free time after last event

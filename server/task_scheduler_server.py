@@ -198,7 +198,7 @@ async def get_calendar_events(
 async def get_free_time_slots(
     date: str,
     start_hour: int = 9,
-    end_hour: int = 17,
+    end_hour: int = 20,
     ctx: Context = None
 ) -> str:
     """
@@ -285,6 +285,8 @@ async def generate_tomorrow_schedule(
 ) -> str:
     """DETAILED step-by-step workflow for generating tomorrow's schedule.
     
+    CRITICAL: You MUST follow ALL these steps in order. Do NOT skip any steps.
+    
     This is the most comprehensive, reusable workflow template for creating daily schedules.
     
     DETAILED WORKFLOW:
@@ -300,10 +302,13 @@ async def generate_tomorrow_schedule(
        - Extract incomplete tasks (lines starting with "-" but no ✓ or ✔)
        - Extract "Still on list" sections from current day's todo list that is not completed as well (lines starting with "-" but no ✓ or ✔)
        - CRITICAL: Include ALL incomplete tasks from today's section
+       - CRITICAL: Use the EXACT task names and details from the document, do NOT create generic tasks
     
     3. GET NEW TASKS
        - Call get_tasks_from_memory()
        - These are tasks added via add_task() calls
+       - CRITICAL: Ask the user what new tasks they want to add before generating the schedule
+       - CRITICAL: Do NOT create generic tasks like "Morning Work Session" or "Project Planning"
     
     4. GET CALENDAR DATA
        - Get tomorrow's date (today + 1 day)
@@ -348,6 +353,8 @@ async def generate_tomorrow_schedule(
     - Incomplete: "- Task name (Xh, urgency - due YYYY-MM-DD)" (NO ✓ or ✔)
     - Completed: "- ✓ Task name" or "- ✔ Task name" (skip these)
     - Still on list: Look for "Still on list" section in current day's todo list that is not completed as well
+    - CRITICAL: Use EXACT task names from the document (e.g., "Build agents project", "Boltz project", "1 Leetcode")
+    - CRITICAL: Do NOT create generic tasks like "Morning Work Session", "Project Planning", "Email Communication"
     
     
     OUTPUT FORMAT (EXACT TEMPLATE):
