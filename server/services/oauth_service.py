@@ -65,18 +65,13 @@ class OAuthService:
         """
         settings = get_settings()
         
-        # Determine redirect URI first
-        if ENV_REDIRECT_URI:
-            redirect_uri = ENV_REDIRECT_URI
-        elif settings.oauth_redirect_uri:
-            redirect_uri = settings.oauth_redirect_uri
-        elif settings.server_url:
-            redirect_uri = f"{settings.server_url}/oauth/callback"
-        else:
+        # Determine redirect URI
+        if not ENV_REDIRECT_URI:
             raise ValueError(
-                "OAuth redirect URI not configured. Set one of: "
-                "GOOGLE_REDIRECT_URI, MCP_OAUTH_REDIRECT_URI, or MCP_SERVER_URL environment variables"
+                "OAuth redirect URI not configured. Set GOOGLE_REDIRECT_URI environment variable"
             )
+        
+        redirect_uri = ENV_REDIRECT_URI
         
         # Load client configuration
         if ENV_CLIENT_ID and ENV_CLIENT_SECRET:
@@ -103,18 +98,12 @@ class OAuthService:
                 client_config = json.load(f)
         
         # Create OAuth flow
-        # Determine redirect URI - prioritize explicit setting, then environment variable, then construct from server_url
-        if ENV_REDIRECT_URI:
-            redirect_uri = ENV_REDIRECT_URI
-        elif settings.oauth_redirect_uri:
-            redirect_uri = settings.oauth_redirect_uri
-        elif settings.server_url:
-            redirect_uri = f"{settings.server_url}/oauth/callback"
-        else:
+        if not ENV_REDIRECT_URI:
             raise ValueError(
-                "OAuth redirect URI not configured. Set one of: "
-                "GOOGLE_REDIRECT_URI, MCP_OAUTH_REDIRECT_URI, or MCP_SERVER_URL environment variables"
+                "OAuth redirect URI not configured. Set GOOGLE_REDIRECT_URI environment variable"
             )
+        
+        redirect_uri = ENV_REDIRECT_URI
         
         flow = Flow.from_client_config(
             client_config,
@@ -155,18 +144,13 @@ class OAuthService:
         
         settings = get_settings()
         
-        # Determine redirect URI first
-        if ENV_REDIRECT_URI:
-            redirect_uri = ENV_REDIRECT_URI
-        elif settings.oauth_redirect_uri:
-            redirect_uri = settings.oauth_redirect_uri
-        elif settings.server_url:
-            redirect_uri = f"{settings.server_url}/oauth/callback"
-        else:
+        # Determine redirect URI
+        if not ENV_REDIRECT_URI:
             raise ValueError(
-                "OAuth redirect URI not configured. Set one of: "
-                "GOOGLE_REDIRECT_URI, MCP_OAUTH_REDIRECT_URI, or MCP_SERVER_URL environment variables"
+                "OAuth redirect URI not configured. Set GOOGLE_REDIRECT_URI environment variable"
             )
+        
+        redirect_uri = ENV_REDIRECT_URI
         
         # Load client configuration
         if ENV_CLIENT_ID and ENV_CLIENT_SECRET:

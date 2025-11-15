@@ -17,5 +17,5 @@ mcp:
   servers:
     task_scheduler_server:
       transport: "http"
-      url: "https://productivity-agent.fly.dev/mcp"
+      url: "https://productivity-agent.fly.dev/mcp" # "http://localhost:8084/mcp" (for local client and server)
       read_transport_sse_timeout_seconds: 900
