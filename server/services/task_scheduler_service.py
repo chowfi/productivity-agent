@@ -79,7 +79,6 @@ class TaskSchedulerService:
             "source": "add_task"
         }
         self.tasks_memory.append(task)
-        self.logger.info(f"Added task: {task_name}")
         return f"Added: {task_name} ({hours}h, {urgency})"
     
     def _load_config(self):
@@ -90,9 +89,8 @@ class TaskSchedulerService:
                 with open(self.config_file, 'r') as f:
                     config = json.load(f)
                     self.default_doc_id = config.get('default_doc_id')
-                    self.logger.info(f"Loaded config: default_doc_id = {self.default_doc_id}")
             else:
-                self.logger.info("No config file found, starting with no default doc ID")
+                pass
         except Exception as e:
             self.logger.error(f"Failed to load config: {e}")
             self.default_doc_id = None
@@ -107,7 +105,6 @@ class TaskSchedulerService:
             }
             with open(self.config_file, 'w') as f:
                 json.dump(config, f, indent=2)
-            self.logger.info(f"Saved config: default_doc_id = {self.default_doc_id}")
         except Exception as e:
             self.logger.error(f"Failed to save config: {e}")
     
@@ -123,7 +120,6 @@ class TaskSchedulerService:
         """
         self.default_doc_id = doc_id
         self._save_config()
-        self.logger.info(f"Set default doc ID: {doc_id}")
         return f"Default Google Doc ID set to: {doc_id}"
     
     def get_default_doc_id(self) -> Optional[str]:
@@ -162,10 +158,6 @@ Once set up, I can help you add tasks and generate daily schedules!"""
 
 Your Google Doc is configured: `{self.default_doc_id}`
 
-You can now:
-- Add tasks with `add_task()`
-- Generate daily schedules with `generate_and_create_tomorrow_schedule()`
-
 Ready to help you manage your daily tasks!"""
     
     # === SCHEDULE GENERATION ===
@@ -191,5 +183,4 @@ Ready to help you manage your daily tasks!"""
         """
         count = len(self.tasks_memory)
         self.tasks_memory = []
-        self.logger.info(f"Cleared {count} tasks from memory")
         return f"Cleared {count} tasks from memory"

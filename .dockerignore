@@ -1,0 +1,96 @@
+# flyctl launch added from .gitignore
+# Python
+**/__pycache__
+**/*.py[cod]
+**/*$py.class
+**/*.so
+**/.Python
+**/build
+**/develop-eggs
+**/dist
+**/downloads
+**/eggs
+**/.eggs
+**/lib
+**/lib64
+**/parts
+**/sdist
+**/var
+**/wheels
+**/*.egg-info
+**/.installed.cfg
+**/*.egg
+
+# Virtual environments
+**/venv
+**/.venv
+**/ENV
+**/env
+
+# IDE
+# .vscode/
+**/.idea
+**/*.swp
+**/*.swo
+**/*~
+
+# OS
+**/.DS_Store
+**/Thumbs.db
+
+# Project specific
+**/data
+**/cache
+**/server_logs
+**/*.log
+**/.env
+**/*.secrets.yaml
+**/fastagent.jsonl
+
+# Node
+**/node_modules
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+
+**/credentials.json
+**/token.json
+**/plan.md
+**/productivity_agent
+
+# flyctl launch added from productivity_agent/.gitignore
+# Created by venv; see https://docs.python.org/3/library/venv.html
+productivity_agent/**/*
+
+# flyctl launch added from productivity_agent/lib/python3.13/site-packages/fast_agent/resources/setup/.gitignore
+# Secrets
+productivity_agent/lib/python3.13/site-packages/fast_agent/resources/setup/**/fastagent.secrets.yaml
+
+# Python cache/bytecode
+productivity_agent/lib/python3.13/site-packages/fast_agent/resources/setup/**/__pycache__
+productivity_agent/lib/python3.13/site-packages/fast_agent/resources/setup/**/*.py[cod]
+
+# Local env and virtualenvs
+productivity_agent/lib/python3.13/site-packages/fast_agent/resources/setup/**/.env
+productivity_agent/lib/python3.13/site-packages/fast_agent/resources/setup/**/.venv
+productivity_agent/lib/python3.13/site-packages/fast_agent/resources/setup/**/venv
+productivity_agent/lib/python3.13/site-packages/fast_agent/resources/setup/**/env
+
+# OS cruft
+productivity_agent/lib/python3.13/site-packages/fast_agent/resources/setup/**/.DS_Store
+productivity_agent/lib/python3.13/site-packages/fast_agent/resources/setup/**/Thumbs.db
+
+# Logs/artifacts
+productivity_agent/lib/python3.13/site-packages/fast_agent/resources/setup/**/fastagent.jsonl
+productivity_agent/lib/python3.13/site-packages/fast_agent/resources/setup/**/*.jsonl
+
+# Editors (optional)
+productivity_agent/lib/python3.13/site-packages/fast_agent/resources/setup/**/.idea
+productivity_agent/lib/python3.13/site-packages/fast_agent/resources/setup/**/.vscode
+
+# Packaging metadata
+productivity_agent/lib/python3.13/site-packages/fast_agent/resources/setup/**/*.dist-info
+productivity_agent/lib/python3.13/site-packages/fast_agent/resources/setup/**/*.egg-info
+productivity_agent/lib/python3.13/site-packages/fast_agent/resources/setup/**/dist
+productivity_agent/lib/python3.13/site-packages/fast_agent/resources/setup/**/build
+fly.toml

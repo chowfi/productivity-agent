@@ -1,0 +1,47 @@
+# fly.toml app configuration file generated for productivity-agent on 2025-11-11T17:56:24-05:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'productivity-agent'
+primary_region = 'iad'
+
+[build]
+
+[deploy]
+  strategy = 'immediate'
+
+[env]
+  PORT = '8084'
+
+[http_service]
+  internal_port = 8084
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+[[services]]
+  protocol = 'tcp'
+  internal_port = 8084
+  processes = ['app']
+
+  [[services.ports]]
+    port = 80
+    handlers = ['http']
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ['tls', 'http']
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+
+# Persistent volume for storing OAuth tokens and user data
+[[mounts]]
+  source = "data"
+  destination = "/app/server/data"

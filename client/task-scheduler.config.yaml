@@ -2,6 +2,8 @@ openai:
   base_url: "https://openrouter.ai/api/v1"
   # Disable parallel tool calls to avoid OpenRouter API issues
   parallel_tool_calls: false
+  # Note: API key should be provided per-user via header or config
+  # Users will use their own OpenRouter API keys
 
 default_model: "openrouter.anthropic/claude-3.5-haiku"
 
@@ -15,5 +17,5 @@ mcp:
   servers:
     task_scheduler_server:
       transport: "http"
-      url: "http://localhost:8084/mcp"
+      url: "https://productivity-agent.fly.dev/mcp"
       read_transport_sse_timeout_seconds: 900

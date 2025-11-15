@@ -52,7 +52,18 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Google OAuth credentials (contains client ID/secret)
 credentials.json
 token.json
+
+# User tokens and configs (contains sensitive OAuth tokens)
+# Note: data/ already ignored above, but being explicit
+server/data/tokens/*.json
+server/data/user_configs/*.json
+
 plan.md
 productivity_agent
+
+ReadME_DEPLOYMENT.md
+CHANGES.md
+SECURITY.md

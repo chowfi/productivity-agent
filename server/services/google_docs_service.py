@@ -3,6 +3,7 @@ Google Docs Service
 
 Handles Google Docs API integration for reading and writing documents.
 Provides simple fetch/write operations for document content.
+Supports per-user authentication via OAuth service.
 """
 
 import os
@@ -12,14 +13,11 @@ from pathlib import Path
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from fastmcp.utilities.logging import get_logger
-
-# If modifying these scopes, delete the file token.json.
-SCOPES = ['https://www.googleapis.com/auth/documents', 'https://www.googleapis.com/auth/drive.file']
+from services.oauth_service import OAuthService
 
 
 class GoogleDocsService:
@@ -27,62 +25,56 @@ class GoogleDocsService:
     Service for Google Docs API integration.
     
     Handles reading, parsing, and updating Google Documents.
+    Supports per-user authentication.
     """
     
-    def __init__(self, credentials_path: str = None):
+    def __init__(self, oauth_service: Optional[OAuthService] = None):
         """
         Initialize Google Docs service.
         
         Args:
-            credentials_path: Path to credentials file (optional)
+            oauth_service: OAuth service instance for user authentication
         """
         self.logger = get_logger("GoogleDocsService")
-        self.credentials_path = credentials_path or "credentials.json"
-        self.service = None
-        self.creds = None
+        self.oauth_service = oauth_service or OAuthService()
     
-    def initialize(self):
-        """Initialize Google Docs API service."""
-        # The file token.json stores the user's access and refresh tokens.
-        token_path = Path("token.json")
+    def get_service_for_user(self, user_id: str):
+        """
+        Get Google Docs service for a specific user.
         
-        if token_path.exists():
-            self.creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
-        
-        # If there are no (valid) credentials available, let the user log in.
-        if not self.creds or not self.creds.valid:
-            if self.creds and self.creds.expired and self.creds.refresh_token:
-                self.creds.refresh(Request())
-            else:
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    self.credentials_path, SCOPES)
-                self.creds = flow.run_local_server(port=0)
+        Args:
+            user_id: User identifier
             
-            # Save the credentials for the next run
-            with open('token.json', 'w') as token:
-                token.write(self.creds.to_json())
+        Returns:
+            Google Docs API service instance
+            
+        Raises:
+            RuntimeError: If user is not authenticated
+        """
+        creds = self.oauth_service.get_user_credentials(user_id)
+        if not creds or not creds.valid:
+            raise RuntimeError(
+                f"User {user_id} is not authenticated. Please complete OAuth flow first."
+            )
         
-        self.service = build('docs', 'v1', credentials=self.creds)
-        self.logger.info("Google Docs service initialized successfully")
+        return build('docs', 'v1', credentials=creds)
     
-    def read_document(self, doc_id: str) -> str:
+    def read_document(self, doc_id: str, user_id: str) -> str:
         """
         Read full document content.
         
         Args:
             doc_id: Google Doc ID
+            user_id: User identifier for authentication
             
         Returns:
             Document text content
         """
-        if not self.service:
-            raise RuntimeError("Service not initialized. Call initialize() first.")
+        service = self.get_service_for_user(user_id)
         
         try:
-            self.logger.info(f"Reading document: {doc_id}")
-            
             # Retrieve the documents contents from the Docs service.
-            document = self.service.documents().get(documentId=doc_id).execute()
+            document = service.documents().get(documentId=doc_id).execute()
             
             # Extract text content
             content = document.get('body', {}).get('content', [])
@@ -96,7 +88,6 @@ class GoogleDocsService:
                             text_content.append(text_run['textRun']['content'])
             
             full_text = ''.join(text_content)
-            self.logger.info(f"Successfully read document ({len(full_text)} characters)")
             return full_text
             
         except HttpError as error:
@@ -109,20 +100,18 @@ class GoogleDocsService:
     
     
     
-    def write_to_doc(self, doc_id: str, content: str):
+    def write_to_doc(self, doc_id: str, content: str, user_id: str):
         """
         Write content to the top of the document.
         
         Args:
             doc_id: Google Doc ID
             content: Content to write to document
+            user_id: User identifier for authentication
         """
-        if not self.service:
-            raise RuntimeError("Service not initialized. Call initialize() first.")
+        service = self.get_service_for_user(user_id)
         
         try:
-            self.logger.info(f"Writing content to document: {doc_id}")
-            
             # Insert at the beginning of the document
             requests = [
                 {
@@ -136,11 +125,10 @@ class GoogleDocsService:
             ]
             
             # Execute the request
-            result = self.service.documents().batchUpdate(
+            result = service.documents().batchUpdate(
                 documentId=doc_id, body={'requests': requests}
             ).execute()
             
-            self.logger.info("Successfully wrote content to document")
             return result
             
         except HttpError as error:

@@ -2,6 +2,7 @@
 Google Calendar Service
 
 Handles Google Calendar API integration for fetching events and managing calendar data.
+Supports per-user authentication via OAuth service.
 """
 
 import os
@@ -11,14 +12,11 @@ from pathlib import Path
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from fastmcp.utilities.logging import get_logger
-
-# If modifying these scopes, delete the file token.json.
-SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
+from services.oauth_service import OAuthService
 
 
 class GoogleCalendarService:
@@ -26,56 +24,52 @@ class GoogleCalendarService:
     Service for Google Calendar API integration.
     
     Handles authentication and fetching calendar events.
+    Supports per-user authentication.
     """
     
-    def __init__(self, credentials_path: str = None):
+    def __init__(self, oauth_service: Optional[OAuthService] = None):
         """
         Initialize Google Calendar service.
         
         Args:
-            credentials_path: Path to credentials file (optional)
+            oauth_service: OAuth service instance for user authentication
         """
         self.logger = get_logger("GoogleCalendarService")
-        self.credentials_path = credentials_path or "credentials.json"
-        self.service = None
-        self.creds = None
+        self.oauth_service = oauth_service or OAuthService()
     
-    def initialize(self):
-        """Initialize Google Calendar API service."""
-        # The file token.json stores the user's access and refresh tokens.
-        token_path = Path("token.json")
+    def get_service_for_user(self, user_id: str):
+        """
+        Get Google Calendar service for a specific user.
         
-        if token_path.exists():
-            self.creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
-        
-        # If there are no (valid) credentials available, let the user log in.
-        if not self.creds or not self.creds.valid:
-            if self.creds and self.creds.expired and self.creds.refresh_token:
-                self.creds.refresh(Request())
-            else:
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    self.credentials_path, SCOPES)
-                self.creds = flow.run_local_server(port=0)
+        Args:
+            user_id: User identifier
             
-            # Save the credentials for the next run
-            with open('token.json', 'w') as token:
-                token.write(self.creds.to_json())
+        Returns:
+            Google Calendar API service instance
+            
+        Raises:
+            RuntimeError: If user is not authenticated
+        """
+        creds = self.oauth_service.get_user_credentials(user_id)
+        if not creds or not creds.valid:
+            raise RuntimeError(
+                f"User {user_id} is not authenticated. Please complete OAuth flow first."
+            )
         
-        self.service = build('calendar', 'v3', credentials=self.creds)
-        self.logger.info("Google Calendar service initialized successfully")
+        return build('calendar', 'v3', credentials=creds)
     
-    def get_events_for_date(self, target_date: date) -> List[Dict]:
+    def get_events_for_date(self, target_date: date, user_id: str) -> List[Dict]:
         """
         Get all events for a specific date.
         
         Args:
             target_date: Date to fetch events for
+            user_id: User identifier for authentication
             
         Returns:
             List of events with start/end times and details
         """
-        if not self.service:
-            raise RuntimeError("Service not initialized. Call initialize() first.")
+        service = self.get_service_for_user(user_id)
         
         try:
             # Convert date to datetime range in local timezone
@@ -93,10 +87,8 @@ class GoogleCalendarService:
             start_time = start_datetime.isoformat()
             end_time = end_datetime.isoformat()
             
-            self.logger.info(f"Fetching events for {target_date}")
-            
             # Call the Calendar API
-            events_result = self.service.events().list(
+            events_result = service.events().list(
                 calendarId='primary',
                 timeMin=start_time,
                 timeMax=end_time,
@@ -121,7 +113,6 @@ class GoogleCalendarService:
                     'attendees': event.get('attendees', [])
                 })
             
-            self.logger.info(f"Found {len(formatted_events)} events for {target_date}")
             return formatted_events
             
         except HttpError as error:
@@ -131,21 +122,20 @@ class GoogleCalendarService:
             self.logger.error(f"Error fetching events: {e}")
             return []
     
-    def get_free_time_slots(self, target_date: date, work_start_hour: int = 8, work_end_hour: int = 20) -> List[Dict]:
+    def get_free_time_slots(self, target_date: date, user_id: str, work_start_hour: int = 8, work_end_hour: int = 20) -> List[Dict]:
         """
         Get free time slots for a specific date.
         
         Args:
             target_date: Date to analyze
+            user_id: User identifier for authentication
             work_start_hour: Start of work day (24-hour format)
             work_end_hour: End of work day (24-hour format)
             
         Returns:
             List of free time slots
         """
-        events = self.get_events_for_date(target_date)
-        self.logger.info(f"Processing {len(events)} events for free time calculation")
-        self.logger.info(f"Work hours: {work_start_hour}:00 to {work_end_hour}:00")
+        events = self.get_events_for_date(target_date, user_id)
         
         # Convert events to time blocks
         event_blocks = []
@@ -156,8 +146,6 @@ class GoogleCalendarService:
             # Convert to local time and handle minutes properly
             start_hour = start_time.hour + start_time.minute / 60.0
             end_hour = end_time.hour + end_time.minute / 60.0
-            
-            self.logger.info(f"Event: {event['summary']} from {start_hour:.2f} to {end_hour:.2f}")
             
             event_blocks.append({
                 'start': start_hour,
@@ -192,5 +180,4 @@ class GoogleCalendarService:
                 'duration': work_end_hour - current_time
             })
         
-        self.logger.info(f"Calculated free slots: {free_slots}")
         return free_slots

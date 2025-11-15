@@ -25,6 +25,42 @@ class ServerSettings(BaseSettings):
         default_factory=lambda: Path(__file__).parent.parent / "data",
         description="Data storage directory",
     )
+    
+    # Google OAuth settings
+    google_client_id: Optional[str] = Field(
+        default=None,
+        description="Google OAuth Client ID"
+    )
+    
+    google_client_secret: Optional[str] = Field(
+        default=None,
+        description="Google OAuth Client Secret"
+    )
+    
+    google_credentials_path: str = Field(
+        default="credentials.json",
+        description="Path to Google credentials JSON file"
+    )
+    
+    oauth_redirect_uri: Optional[str] = Field(
+        default=None,
+        description="OAuth redirect URI (e.g., https://your-app.fly.dev/oauth/callback)"
+    )
+    
+    # Server settings
+    server_url: Optional[str] = Field(
+        default=None,
+        description="Public server URL for OAuth callbacks"
+    )
+    
+    # Session/security
+    session_secret: Optional[str] = Field(
+        default=None,
+        description="Secret key for session management"
+    )
+    
+    # Note: OpenRouter API keys are only needed for local FastAgent client usage
+    # When using ChatGPT, ChatGPT uses its own LLM - no OpenRouter keys needed
 
 
 # ============= Singleton Pattern =============
