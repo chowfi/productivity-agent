@@ -11,7 +11,7 @@ Automatically generates a time-blocked task list for the next day by fetching ca
 
 (2) ***ChatGPT*** -- available for paid users -- as the client and server hosted on fly.io (recommended)
 
-## Option 1: Set up for local CLI client and local server##
+## Option 1: Set up for local CLI client and local server ##
 
 Step 1. Create a new project at https://console.cloud.google.com/
 
