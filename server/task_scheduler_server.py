@@ -23,6 +23,7 @@ from services.google_calendar_service import GoogleCalendarService
 from services.google_docs_service import GoogleDocsService
 from services.oauth_service import OAuthService
 from services.user_config_service import UserConfigService
+from services.security_service import SecurityService
 from config.settings import get_settings
 
 logger = get_logger(__name__)
@@ -148,6 +149,7 @@ class AppContext:
     google_docs_service: GoogleDocsService
     oauth_service: OAuthService
     user_config_service: UserConfigService
+    security_service: SecurityService
     settings: object
 
 @asynccontextmanager
@@ -160,6 +162,7 @@ async def app_lifespan(mcp: FastMCP):
     # Initialize services
     oauth_service = OAuthService()
     user_config_service = UserConfigService()
+    security_service = SecurityService(data_dir=settings.data_dir)
     google_calendar_service = GoogleCalendarService(oauth_service=oauth_service)
     google_docs_service = GoogleDocsService(oauth_service=oauth_service)
     
@@ -175,6 +178,7 @@ async def app_lifespan(mcp: FastMCP):
         google_docs_service=google_docs_service,
         oauth_service=oauth_service,
         user_config_service=user_config_service,
+        security_service=security_service,
         settings=settings
     )
     
@@ -482,14 +486,46 @@ async def get_calendar_events(
     
     # Security: Require authentication
     oauth_service = ctx.request_context.lifespan_context.oauth_service
+    security_service = ctx.request_context.lifespan_context.security_service
     try:
         user_id = require_authentication(ctx, oauth_service)
     except (RuntimeError, ValueError) as e:
         logger.error(f"Authentication failed: {e}")
         return f"Error: {str(e)}"
     
+    # Security: Rate limiting
+    is_allowed, rate_limit_error = security_service.check_rate_limit(user_id, 'read')
+    if not is_allowed:
+        security_service.log_audit_event('rate_limit_exceeded', user_id, {'operation': 'get_calendar_events', 'date': date}, 'warning')
+        return f"Error: {rate_limit_error}"
+    
     service = ctx.request_context.lifespan_context.google_calendar_service
     events = service.get_events_for_date(target_date, user_id)
+    
+    # Security: Check calendar event titles/descriptions for prompt injection
+    for event in events:
+        event_text = f"{event.get('summary', '')} {event.get('description', '')}"
+        is_injection, patterns = security_service.detect_prompt_injection(event_text)
+        if is_injection:
+            security_service.log_audit_event(
+                'prompt_injection_detected',
+                user_id,
+                {
+                    'operation': 'get_calendar_events',
+                    'date': date,
+                    'event_id': event.get('id'),
+                    'patterns': patterns
+                },
+                'warning'
+            )
+    
+    # Log successful read
+    security_service.log_audit_event('read_operation', user_id, {
+        'operation': 'get_calendar_events',
+        'date': date,
+        'event_count': len(events)
+    }, 'info')
+    
     result = f"Found {len(events)} events for {date}: {events}"
     logger.info(f"📅 get_calendar_events result: {result[:200]}...")
     return result
@@ -534,14 +570,29 @@ async def get_free_time_slots(
     
     # Security: Require authentication
     oauth_service = ctx.request_context.lifespan_context.oauth_service
+    security_service = ctx.request_context.lifespan_context.security_service
     try:
         user_id = require_authentication(ctx, oauth_service)
     except (RuntimeError, ValueError) as e:
         logger.error(f"Authentication failed: {e}")
         return f"Error: {str(e)}"
     
+    # Security: Rate limiting
+    is_allowed, rate_limit_error = security_service.check_rate_limit(user_id, 'read')
+    if not is_allowed:
+        security_service.log_audit_event('rate_limit_exceeded', user_id, {'operation': 'get_free_time_slots', 'date': date}, 'warning')
+        return f"Error: {rate_limit_error}"
+    
     service = ctx.request_context.lifespan_context.google_calendar_service
     slots = service.get_free_time_slots(target_date, user_id, start_hour, end_hour)
+    
+    # Log successful read
+    security_service.log_audit_event('read_operation', user_id, {
+        'operation': 'get_free_time_slots',
+        'date': date,
+        'slot_count': len(slots)
+    }, 'info')
+    
     result = f"Free time slots for {date}: {slots}"
     logger.info(f"⏰ get_free_time_slots result: {result[:200]}...")
     return result
@@ -568,24 +619,64 @@ async def read_doc_content(
     
     # Security: Require authentication
     oauth_service = ctx.request_context.lifespan_context.oauth_service
+    security_service = ctx.request_context.lifespan_context.security_service
     try:
         user_id = require_authentication(ctx, oauth_service)
     except (RuntimeError, ValueError) as e:
         logger.error(f"Authentication failed: {e}")
         return f"Error: {str(e)}"
     
+    # Security: Rate limiting
+    is_allowed, rate_limit_error = security_service.check_rate_limit(user_id, 'read')
+    if not is_allowed:
+        security_service.log_audit_event('rate_limit_exceeded', user_id, {'operation': 'read_doc_content', 'doc_id': doc_id}, 'warning')
+        return f"Error: {rate_limit_error}"
+    
     service = ctx.request_context.lifespan_context.google_docs_service
     try:
         content = service.read_document(doc_id, user_id)
+        
         # Security: Limit response size to prevent DoS
         max_content_length = 100000  # 100KB
         if len(content) > max_content_length:
             logger.warning(f"Document content too large: {len(content)} chars, truncating")
             content = content[:max_content_length] + "\n\n[Content truncated - document too large]"
+        
+        # Security: Check for prompt injection in content
+        is_injection, patterns = security_service.detect_prompt_injection(content)
+        if is_injection:
+            security_service.log_audit_event(
+                'prompt_injection_detected',
+                user_id,
+                {
+                    'operation': 'read_doc_content',
+                    'doc_id': doc_id,
+                    'patterns': patterns,
+                    'content_preview': security_service.sanitize_content_for_logging(content, 200)
+                },
+                'warning'
+            )
+            # Return content with warning (don't block, but log it)
+            warning = security_service.get_security_warning_for_content(content)
+            if warning:
+                content = f"{warning}\n\n{content}"
+        
+        # Log successful read
+        security_service.log_audit_event('read_operation', user_id, {
+            'operation': 'read_doc_content',
+            'doc_id': doc_id,
+            'content_length': len(content)
+        }, 'info')
+        
         logger.info(f"📄 read_doc_content result length: {len(content)} chars")
         return content
     except Exception as e:
         logger.error(f"Error reading document: {e}")
+        security_service.log_audit_event('read_error', user_id, {
+            'operation': 'read_doc_content',
+            'doc_id': doc_id,
+            'error': str(e)
+        }, 'error')
         return f"Error: Failed to read document. {str(e)}"
 
 @mcp.tool()
@@ -612,26 +703,61 @@ async def write_schedule_to_doc(
     
     # Security: Require authentication
     oauth_service = ctx.request_context.lifespan_context.oauth_service
+    security_service = ctx.request_context.lifespan_context.security_service
     try:
         user_id = require_authentication(ctx, oauth_service)
     except (RuntimeError, ValueError) as e:
         logger.error(f"Authentication failed: {e}")
         return f"Error: {str(e)}"
     
+    # Security: Rate limiting
+    is_allowed, rate_limit_error = security_service.check_rate_limit(user_id, 'write')
+    if not is_allowed:
+        security_service.log_audit_event('rate_limit_exceeded', user_id, {
+            'operation': 'write_schedule_to_doc',
+            'doc_id': doc_id
+        }, 'warning')
+        return f"Error: {rate_limit_error}"
+    
     # Security: Limit content size to prevent DoS
     max_content_length = 50000  # 50KB for writes
     if len(content) > max_content_length:
         logger.error(f"Content too large: {len(content)} chars, max is {max_content_length}")
+        security_service.log_audit_event('write_validation_failed', user_id, {
+            'operation': 'write_schedule_to_doc',
+            'doc_id': doc_id,
+            'reason': 'content_too_large',
+            'size': len(content)
+        }, 'warning')
         return f"Error: Content too large ({len(content)} chars). Maximum is {max_content_length} characters."
+    
+    # Security: Validate write content for suspicious patterns
+    is_valid, validation_error = security_service.validate_write_content(content, doc_id, user_id)
+    if not is_valid:
+        return f"Error: {validation_error}"
     
     service = ctx.request_context.lifespan_context.google_docs_service
     try:
         service.write_to_doc(doc_id, content, user_id)
+        
+        # Log successful write
+        security_service.log_audit_event('write_operation', user_id, {
+            'operation': 'write_schedule_to_doc',
+            'doc_id': doc_id,
+            'content_length': len(content),
+            'content_preview': security_service.sanitize_content_for_logging(content, 100)
+        }, 'info')
+        
         result = f"Successfully wrote content to document {doc_id}"
         logger.info(f"✍️ write_schedule_to_doc completed")
         return result
     except Exception as e:
         logger.error(f"Error writing to document: {e}")
+        security_service.log_audit_event('write_error', user_id, {
+            'operation': 'write_schedule_to_doc',
+            'doc_id': doc_id,
+            'error': str(e)
+        }, 'error')
         return f"Error: Failed to write to document. {str(e)}"
 
 @mcp.tool()
@@ -689,11 +815,18 @@ async def get_doc_resource(doc_id: str, ctx: Context) -> str:
     
     # Security: Require authentication
     oauth_service = ctx.request_context.lifespan_context.oauth_service
+    security_service = ctx.request_context.lifespan_context.security_service
     try:
         user_id = require_authentication(ctx, oauth_service)
     except (RuntimeError, ValueError) as e:
         logger.error(f"Authentication failed: {e}")
         return f"Error: {str(e)}"
+    
+    # Security: Rate limiting
+    is_allowed, rate_limit_error = security_service.check_rate_limit(user_id, 'read')
+    if not is_allowed:
+        security_service.log_audit_event('rate_limit_exceeded', user_id, {'operation': 'get_doc_resource', 'doc_id': doc_id}, 'warning')
+        return f"Error: {rate_limit_error}"
     
     service = ctx.request_context.lifespan_context.google_docs_service
     try:
@@ -702,9 +835,36 @@ async def get_doc_resource(doc_id: str, ctx: Context) -> str:
         max_content_length = 100000  # 100KB
         if len(content) > max_content_length:
             content = content[:max_content_length] + "\n\n[Content truncated - document too large]"
+        
+        # Security: Check for prompt injection
+        is_injection, patterns = security_service.detect_prompt_injection(content)
+        if is_injection:
+            security_service.log_audit_event(
+                'prompt_injection_detected',
+                user_id,
+                {
+                    'operation': 'get_doc_resource',
+                    'doc_id': doc_id,
+                    'patterns': patterns
+                },
+                'warning'
+            )
+        
+        # Log resource access
+        security_service.log_audit_event('read_operation', user_id, {
+            'operation': 'get_doc_resource',
+            'doc_id': doc_id,
+            'content_length': len(content)
+        }, 'info')
+        
         return content
     except Exception as e:
         logger.error(f"Error reading document resource: {e}")
+        security_service.log_audit_event('read_error', user_id, {
+            'operation': 'get_doc_resource',
+            'doc_id': doc_id,
+            'error': str(e)
+        }, 'error')
         return f"Error: Failed to read document. {str(e)}"
 
 # === PROMPTS ===
