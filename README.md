@@ -71,7 +71,7 @@ Step 11. Run the CLI client:
    ```
 Step 12. Ask for your personalized next day task list
 
-## Option 2: Set up for ChatGPT client and fly.io server##
+## Option 2: Set up for ChatGPT client and fly.io server ##
 
 Step 1. Visit https://chatgpt.com/#settings/Connectors 
 
