@@ -240,7 +240,14 @@ Your mission: Help users plan their day by intelligently combining tasks from mu
 **If user says "generate schedule", "tomorrow's schedule", "create schedule", etc.:**
 - Step 1: Call get_workflow_instructions()
 - Step 2: Follow the returned workflow exactly
-- Step 3: Use only the tools from the list above""",
+- Step 3: Use only the tools from the list above
+
+**CRITICAL: NEVER GENERATE A GENERIC OR TEMPLATE SCHEDULE**
+- **DO NOT** create schedules without checking the user's actual calendar first
+- **DO NOT** create schedules without reading the user's task document first
+- **DO NOT** skip step 4 (get_calendar_events) - this is MANDATORY
+- **ALWAYS** call get_calendar_events() before creating any schedule
+- **ALWAYS** use the user's actual calendar events and free time slots""",
     lifespan=app_lifespan
 )
 
@@ -428,13 +435,17 @@ async def get_workflow_instructions(
      * DO NOT invent placeholder tasks like "Morning Work Session" or "Deep work block"
      * ONLY use: (1) carryover tasks from document, (2) tasks user explicitly provides, (3) "Still on list" tasks
 
-4. GET CALENDAR DATA - **YOU MUST DO THIS - DO NOT SKIP THIS STEP**
+4. GET CALENDAR DATA - **YOU MUST DO THIS - DO NOT SKIP THIS STEP - THIS IS MANDATORY**
+   - **STOP: DO NOT PROCEED TO STEP 5 WITHOUT COMPLETING THIS STEP**
+   - **DO NOT GENERATE A SCHEDULE WITHOUT CHECKING THE USER'S CALENDAR FIRST**
    - Calculate tomorrow's date (today + 1 day, format: YYYY-MM-DD)
    - **CALL get_calendar_events(tomorrow_date) tool FIRST** (e.g., "2025-11-15")
    - **THEN CALL get_free_time_slots(tomorrow_date, 8, 20) tool**
    - **CRITICAL: You MUST call get_calendar_events() BEFORE get_free_time_slots()**
+   - **CRITICAL: You MUST call get_calendar_events() BEFORE creating any schedule**
    - **CRITICAL: Only include main calendar events (visible in Google Calendar UI)**
    - **CRITICAL: Include ALL calendar events in the schedule as [Meeting: ...] entries**
+   - **WARNING: If you skip this step and generate a generic schedule, you are NOT following the workflow correctly**
 
 5. COMBINE ALL TASKS
    - Merge: incomplete from doc + new from memory + still on list from doc
@@ -791,7 +802,24 @@ async def write_schedule_to_doc(
         doc_id: Google Doc ID
         content: Content to write to document
     """
-    logger.info(f"✍️ TOOL CALLED: write_schedule_to_doc(doc_id={doc_id}, content_length={len(content)})")
+    # Log immediately to verify function is being called
+    try:
+        logger.info(f"✍️ TOOL CALLED: write_schedule_to_doc(doc_id={doc_id}, content_length={len(content) if content else 0})")
+        
+        # Validate content parameter was received
+        if content is None:
+            logger.error("✍️ ERROR: content parameter is None")
+            return "Error: Content parameter is missing or None."
+        
+        # Check for potential encoding issues
+        try:
+            content.encode('utf-8')
+        except UnicodeEncodeError as e:
+            logger.error(f"✍️ ERROR: Content encoding issue: {e}")
+            return f"Error: Content contains invalid characters that cannot be encoded."
+    except Exception as e:
+        logger.error(f"✍️ ERROR in write_schedule_to_doc entry: {e}", exc_info=True)
+        return f"Error: Failed to process write request. {str(e)}"
     
     # Security: Validate doc_id
     try:
@@ -1136,6 +1164,35 @@ async def health_check(request: Request):
             },
             status_code=503
         )
+
+@mcp.custom_route("/debug/request-size", methods=["POST"])
+async def debug_request_size(request: Request):
+    """
+    Debug endpoint to test request size limits.
+    Helps diagnose if 400 errors are due to request body size limits.
+    """
+    try:
+        body = await request.body()
+        body_size = len(body)
+        
+        # Try to parse as JSON
+        try:
+            import json
+            data = json.loads(body)
+            content_size = len(data.get('content', '')) if isinstance(data, dict) else 0
+        except:
+            content_size = 0
+        
+        return JSONResponse({
+            "request_body_size": body_size,
+            "content_size": content_size,
+            "max_content_limit": 50000,
+            "status": "ok" if body_size < 100000 else "warning - large request",
+            "note": "If request_body_size is very large, FastMCP might reject it before reaching the tool function"
+        })
+    except Exception as e:
+        logger.error(f"Error in debug_request_size: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 @mcp.custom_route("/tools", methods=["GET"])
 async def list_tools(request: Request):
