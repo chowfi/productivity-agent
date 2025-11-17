@@ -123,20 +123,27 @@ def get_user_id(ctx: Context) -> str:
     Note: This function does NOT sanitize or validate. Use require_authentication()
     for security-critical operations.
     """
-    if ctx and ctx.request_context:
-        # Try to get from headers (when called via HTTP)
-        headers = getattr(ctx.request_context, 'headers', {})
-        if headers:
-            user_id = headers.get('x-user-id') or headers.get('user-id')
-            if user_id:
+    try:
+        if ctx and hasattr(ctx, 'request_context') and ctx.request_context:
+            # Try to get from headers (when called via HTTP)
+            headers = getattr(ctx.request_context, 'headers', {})
+            if headers:
+                user_id = headers.get('x-user-id') or headers.get('user-id') or headers.get('X-User-ID')
+                if user_id:
+                    logger.debug(f"Extracted user_id from headers: {user_id}")
+                    return user_id
+            
+            # Try to get from metadata
+            metadata = getattr(ctx.request_context, 'metadata', {})
+            if metadata and 'user_id' in metadata:
+                user_id = metadata['user_id']
+                logger.debug(f"Extracted user_id from metadata: {user_id}")
                 return user_id
-        
-        # Try to get from metadata
-        metadata = getattr(ctx.request_context, 'metadata', {})
-        if metadata and 'user_id' in metadata:
-            return metadata['user_id']
+    except Exception as e:
+        logger.warning(f"Error extracting user_id from context: {e}")
     
     # Default fallback (for backward compatibility or local testing)
+    logger.debug("Using default user_id")
     return 'default'
 
 # === APPLICATION CONTEXT ===
@@ -155,40 +162,46 @@ class AppContext:
 @asynccontextmanager
 async def app_lifespan(mcp: FastMCP):
     """Initialize all services for the task scheduler."""
-    # Get settings
-    settings = get_settings()
-    settings.data_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Initialize services
-    oauth_service = OAuthService()
-    user_config_service = UserConfigService()
-    security_service = SecurityService(data_dir=settings.data_dir)
-    google_calendar_service = GoogleCalendarService(oauth_service=oauth_service)
-    google_docs_service = GoogleDocsService(oauth_service=oauth_service)
-    
-    task_scheduler_service = TaskSchedulerService(
-        data_dir=settings.data_dir,
-        google_docs_service=google_docs_service,
-        google_calendar_service=google_calendar_service
-    )
-    
-    app_context = AppContext(
-        task_scheduler_service=task_scheduler_service,
-        google_calendar_service=google_calendar_service,
-        google_docs_service=google_docs_service,
-        oauth_service=oauth_service,
-        user_config_service=user_config_service,
-        security_service=security_service,
-        settings=settings
-    )
-    
-    # Store app_context globally for OAuth routes
-    set_global_app_context(app_context)
-    
     try:
+        logger.info("Initializing Task Scheduler MCP Server...")
+        # Get settings
+        settings = get_settings()
+        settings.data_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Initialize services
+        logger.info("Initializing services...")
+        oauth_service = OAuthService()
+        user_config_service = UserConfigService()
+        security_service = SecurityService(data_dir=settings.data_dir)
+        google_calendar_service = GoogleCalendarService(oauth_service=oauth_service)
+        google_docs_service = GoogleDocsService(oauth_service=oauth_service)
+        
+        task_scheduler_service = TaskSchedulerService(
+            data_dir=settings.data_dir,
+            google_docs_service=google_docs_service,
+            google_calendar_service=google_calendar_service
+        )
+        
+        app_context = AppContext(
+            task_scheduler_service=task_scheduler_service,
+            google_calendar_service=google_calendar_service,
+            google_docs_service=google_docs_service,
+            oauth_service=oauth_service,
+            user_config_service=user_config_service,
+            security_service=security_service,
+            settings=settings
+        )
+        
+        # Store app_context globally for OAuth routes
+        set_global_app_context(app_context)
+        logger.info("Task Scheduler MCP Server initialized successfully")
+        
         yield app_context
+    except Exception as e:
+        logger.error(f"Error during app lifespan: {e}", exc_info=True)
+        raise
     finally:
-        pass
+        logger.info("Shutting down Task Scheduler MCP Server")
 
 # === MCP SERVER ===
 
@@ -203,14 +216,31 @@ Current date: {current_date_str}
 
 Your mission: Help users plan their day by intelligently combining tasks from multiple sources, prioritizing work, and time-blocking around meetings.
 
-You have access to tools for:
-- Google Calendar integration (events, free time slots)
-- Google Docs integration (read/write schedules)  
-- Task memory storage
-- Document content as resources
-- get_workflow_instructions() tool - **CALL THIS IMMEDIATELY when user asks for a schedule**
+**CRITICAL: AVAILABLE TOOLS - USE ONLY THESE TOOLS:**
+- get_workflow_instructions() - **MUST CALL THIS FIRST when user asks for a schedule**
+- check_setup_status() - Check if system is configured
+- set_default_doc_id(doc_id) - Set the default Google Doc ID
+- get_default_doc_id() - Get the current default Doc ID
+- read_doc_content(doc_id) - Read content from a Google Doc
+- write_schedule_to_doc(doc_id, content) - Write schedule to a Google Doc
+- get_calendar_events(date) - Get calendar events for a date (YYYY-MM-DD)
+- get_free_time_slots(date, start_hour, end_hour) - Get free time slots
+- add_task(task_name, hours, urgency, due_date) - Add a task to memory
+- get_tasks_from_memory() - Get all tasks in memory
+- clear_tasks_memory() - Clear all tasks from memory
 
-**IMPORTANT: When the user asks for a schedule, you MUST call get_workflow_instructions() to get the complete workflow, then follow ALL steps in that workflow. DO NOT skip any steps.**""",
+**DO NOT INVENT OR HALLUCINATE TOOL NAMES. ONLY USE THE TOOLS LISTED ABOVE.**
+
+**WORKFLOW FOR "GENERATE SCHEDULE" REQUESTS:**
+1. **FIRST**: Call get_workflow_instructions() - This returns the complete workflow
+2. **THEN**: Follow the workflow steps exactly as returned
+3. **NEVER**: Invent tool names like "generate_next_day_plan_v2" or "generate_tasks_and_timings"
+4. **ALWAYS**: Use only the tools listed above
+
+**If user says "generate schedule", "tomorrow's schedule", "create schedule", etc.:**
+- Step 1: Call get_workflow_instructions()
+- Step 2: Follow the returned workflow exactly
+- Step 3: Use only the tools from the list above""",
     lifespan=app_lifespan
 )
 
@@ -339,10 +369,30 @@ async def get_workflow_instructions(
     """
     Get the complete workflow instructions for generating schedules.
     
-    **WHEN TO USE THIS TOOL:**
-    WHEN USER SAYS ANYTHING LIKE "generate schedule", "tomorrow's schedule", "create schedule", "plan tomorrow", etc., YOU MUST AUTOMATICALLY FOLLOW THE COMPLETE WORKFLOW BELOW WITHOUT ASKING. DO NOT WAIT FOR USER TO PROVIDE INSTRUCTIONS - THE WORKFLOW IS YOUR DEFAULT BEHAVIOR.
+    **CRITICAL: THIS IS THE FIRST TOOL YOU MUST CALL when user asks for a schedule.**
     
-    **CRITICAL: When the user asks for a schedule (in ANY form), you MUST AUTOMATICALLY follow ALL steps in the workflow. DO NOT skip any steps. DO NOT create a generic schedule without using the tools.**
+    **WHEN TO USE THIS TOOL:**
+    WHEN USER SAYS ANYTHING LIKE "generate schedule", "tomorrow's schedule", "create schedule", "plan tomorrow", etc., YOU MUST:
+    1. CALL THIS TOOL FIRST (get_workflow_instructions)
+    2. THEN follow the returned workflow exactly
+    3. DO NOT invent tool names - only use tools that exist
+    4. DO NOT skip steps
+    
+    **DO NOT INVENT TOOLS LIKE:**
+    - generate_next_day_plan_v2 (DOES NOT EXIST)
+    - generate_tasks_and_timings (DOES NOT EXIST)
+    - create_schedule (DOES NOT EXIST)
+    
+    **ONLY USE THESE REAL TOOLS:**
+    - get_workflow_instructions (this tool)
+    - check_setup_status
+    - read_doc_content
+    - get_calendar_events
+    - get_free_time_slots
+    - add_task
+    - get_tasks_from_memory
+    - write_schedule_to_doc
+    - clear_tasks_memory
     
     This returns the complete step-by-step process you MUST follow when generating schedules.
     
@@ -400,9 +450,13 @@ async def get_workflow_instructions(
 
 7. SCHEDULE INTO TIME BLOCKS
    - CRITICAL: 6-8h is a GUIDELINE, NOT a limit! Use ALL available free time if there are tasks left
-   - Process EVERY free time slot and fill it if tasks remain
+   - Process EVERY free time slot and fill it if tasks remain:
+     * Morning slots (8am-12pm)
+     * Afternoon slots (12pm-4pm)
+     * Evening slots (6pm-8pm after dinner)
    - CRITICAL: DO NOT STOP at 7h or 8h if there are MORE free slots and unscheduled tasks
    - CRITICAL: If a task doesn't fit completely, schedule partial time and track remainder
+   - Example: If you've scheduled 7h and there's a 6:20pm-8pm slot with 0.5h task remaining → SCHEDULE IT!
    - CRITICAL: After scheduling, if a task has 0h remaining, it's COMPLETE - do NOT add to "Still on list"
    - CRITICAL: Check for time overlaps - no overlapping tasks/meetings
    - Meetings don't count toward work hours
@@ -413,9 +467,26 @@ async def get_workflow_instructions(
    - If Remaining = 0h → Task is COMPLETE, exclude from "Still on list"
    - If Remaining > 0h → Include in "Still on list" with correct remaining time
 
-9. FORMAT SCHEDULE (EXACT FORMAT)
+9. SORT ALL EVENTS CHRONOLOGICALLY - **DO THIS BEFORE FORMATTING**
+   - Collect ALL scheduled items: tasks AND meetings
+   - Sort by START TIME (HH:MM) - earliest to latest
+   - Create a single ordered list mixing tasks and meetings by time
+   - This sorted list is what you will format in step 10
+
+10. FORMAT SCHEDULE (EXACT FORMAT)
    - Header: MM/DD/YY - Day
-   - CRITICAL: List ALL events chronologically - BOTH tasks AND meetings mixed by time
+   - **CRITICAL: CHRONOLOGICAL ORDERING - THIS IS MANDATORY**
+     * Sort ALL events (both tasks AND meetings) by START TIME (HH:MM)
+     * Earliest event first, latest event last
+     * DO NOT group meetings together or tasks together - mix them by time
+     * Example correct order:
+       - [Meeting: 07:45 - 09:15: Walk Yul] ← earliest (7:45)
+       - [Meeting: 08:00 - 08:30: Journal] ← next (8:00)
+       - 09:15 - 09:45: Task name ← next (9:15)
+       - [Meeting: 12:00 - 13:00: Lunch] ← next (12:00)
+     * Example WRONG order (DO NOT DO THIS):
+       - 09:15 - 09:45: Task name ← WRONG! This is after 7:45
+       - [Meeting: 07:45 - 09:15: Walk Yul] ← Should be first!
    - Task format: HH:MM - HH:MM: Task name (Xh, urgency - due date)
    - Meeting format: [Meeting: HH:MM - HH:MM: Meeting name]
    - CRITICAL: Include EVERY calendar event as [Meeting: ...] in chronological order
@@ -426,16 +497,44 @@ async def get_workflow_instructions(
    - Footer: "---"
    - CRITICAL: NO "NOTES" sections, NO custom formatting
 
-10. WRITE AND CLEANUP - **YOU MUST DO THIS**
+11. WRITE AND CLEANUP - **YOU MUST DO THIS**
    - **CALL write_schedule_to_doc(doc_id, formatted_schedule) tool to save the schedule**
    - **CALL clear_tasks_memory() tool to clean up**
    - **DO NOT skip writing to the document - the schedule must be saved**
+
+**EXAMPLE OUTPUT FORMAT (NOTE: All events in chronological order by start time):**
+10/23/25 - Thursday
+
+[Meeting: 07:45 - 08:00: Morning Routine]
+[Meeting: 08:00 - 08:30: Journal / PT Rehab]
+09:00 - 10:30: Gym (1.5h, critical - due 2025-10-23)
+10:30 - 12:30: Boltz project (2h, medium urgency - due 2025-10-24)
+12:30 - 13:30: 1 Leetcode (1h, medium urgency - due 2025-10-24)
+13:30 - 16:00: Update dad documentation (2.5h, medium urgency - due 2025-10-26)
+[Meeting: 16:00 - 17:30: Walk Yul]
+[Meeting: 17:30 - 18:20: Cook Dinner]
+18:20 - 18:50: Update dad documentation (0.5h remaining, medium urgency - due 2025-10-26)
+18:50 - 20:00: Boltz project (1.17h, medium urgency - due 2025-10-24)
+
+Still on list (not scheduled today):
+- Boltz project (0.83h remaining, medium urgency - due 2025-10-24)
+
+---
+
+**IMPORTANT MATH CHECK:**
+- If Boltz = 4h total, scheduled 2h + 1.17h = 3.17h → remaining = 0.83h ✓ (include in "Still on list")
+- If Boltz = 3.17h total, scheduled 2h + 1.17h = 3.17h → remaining = 0h ✗ (DO NOT include, task complete!)
+- If Gym = 1.5h total, scheduled 1.5h → remaining = 0h ✗ (DO NOT include)
+- If ALL tasks have 0h remaining → "Still on list" shows: "- None (all tasks complete!)"
+
+**NOTE:** ALL meetings shown in [Meeting: ...] format. ALL free time used (8am-8pm minus meetings).
 
 **CRITICAL RULES:**
 - Do NOT skip step 2 (reading doc)
 - Do NOT skip step 3 (asking for new tasks)
 - Do NOT skip step 4 (getting calendar data)
-- Do NOT skip step 10 (writing to document)
+- Do NOT skip step 9 (sorting chronologically)
+- Do NOT skip step 11 (writing to document)
 - ALWAYS follow ALL steps in order"""
 
 @mcp.tool()
@@ -1010,6 +1109,90 @@ async def set_openrouter_key(request: Request):
         logger.error(f"Error storing OpenRouter API key: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@mcp.custom_route("/health", methods=["GET"])
+async def health_check(request: Request):
+    """
+    Health check endpoint for monitoring and connection validation.
+    Helps prevent ChatGPT from caching bad connection states.
+    """
+    try:
+        # Check if services are initialized
+        oauth_service = get_oauth_service()
+        
+        return JSONResponse({
+            "status": "healthy",
+            "service": "task-scheduler-mcp-server",
+            "version": "1.0.0",
+            "mcp_endpoint": "/mcp",
+            "timestamp": datetime.utcnow().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return JSONResponse(
+            {
+                "status": "unhealthy",
+                "error": str(e),
+                "timestamp": datetime.utcnow().isoformat()
+            },
+            status_code=503
+        )
+
+@mcp.custom_route("/tools", methods=["GET"])
+async def list_tools(request: Request):
+    """
+    List available MCP tools.
+    Helps diagnose connector issues by showing what tools are actually available.
+    """
+    try:
+        # Get list of tools from the MCP server
+        # FastMCP exposes tools, but we need to get them from the mcp instance
+        # For now, return a static list based on what we know exists
+        available_tools = [
+            "add_task",
+            "set_default_doc_id",
+            "get_default_doc_id",
+            "get_workflow_instructions",
+            "check_setup_status",
+            "get_calendar_events",
+            "get_free_time_slots",
+            "read_doc_content",
+            "write_schedule_to_doc",
+            "get_tasks_from_memory",
+            "clear_tasks_memory"
+        ]
+        
+        # Common hallucinated tool names that don't exist
+        non_existent_tools = [
+            "generate_next_day_plan_v2",
+            "generate_tasks_and_timings",
+            "create_schedule",
+            "generate_schedule",
+            "plan_next_day"
+        ]
+        
+        return JSONResponse({
+            "tools": available_tools,
+            "count": len(available_tools),
+            "non_existent_tools": non_existent_tools,
+            "note": "Tools are accessed via MCP protocol at /mcp, not as REST endpoints",
+            "mcp_endpoint": "/mcp",
+            "connector_diagnosis": {
+                "if_you_see_resource_not_found": "ChatGPT connector is in bad state - delete and recreate it",
+                "if_tools_not_appearing": "Check that connector URL ends with /mcp",
+                "if_hallucinated_tools": "ChatGPT is inventing tool names - recreate connector"
+            },
+            "timestamp": datetime.utcnow().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Error listing tools: {e}")
+        return JSONResponse(
+            {
+                "error": str(e),
+                "timestamp": datetime.utcnow().isoformat()
+            },
+            status_code=500
+        )
+
 @mcp.custom_route("/privacy", methods=["GET"])
 async def privacy_policy(request: Request):
     """Privacy Policy page."""
@@ -1162,6 +1345,20 @@ async def privacy_policy(request: Request):
 if __name__ == "__main__":
     # Run FastMCP - OAuth routes will be registered automatically
     # FastMCP handles MCP protocol automatically at /mcp endpoint
-    logger.info("Starting Task Scheduler MCP Server on port 8084")
+    logger.info("=" * 60)
+    logger.info("Starting Task Scheduler MCP Server")
+    logger.info("=" * 60)
     logger.info("MCP endpoint available at: http://0.0.0.0:8084/mcp")
-    mcp.run(transport="streamable-http", host="0.0.0.0", port=8084)
+    logger.info("Health check: GET /health")
+    logger.info("Tools list: GET /tools")
+    logger.info("OAuth endpoints:")
+    logger.info("  - GET /oauth/authorize?user_id={id}")
+    logger.info("  - GET /oauth/callback")
+    logger.info("  - GET /oauth/status?user_id={id}")
+    logger.info("=" * 60)
+    
+    try:
+        mcp.run(transport="streamable-http", host="0.0.0.0", port=8084)
+    except Exception as e:
+        logger.error(f"Fatal error starting MCP server: {e}", exc_info=True)
+        raise
